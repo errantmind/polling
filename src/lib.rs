@@ -2,10 +2,6 @@
 //!
 //! Supported platforms:
 //! - [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android
-//! - [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, FreeBSD, NetBSD, OpenBSD,
-//!   DragonFly BSD
-//! - [event ports](https://illumos.org/man/port_create): illumos, Solaris
-//! - [wepoll](https://github.com/piscisaureus/wepoll): Windows
 //!
 //! Polling is done in oneshot mode, which means interest in I/O events needs to be re-enabled
 //! after an event is delivered if we're interested in the next event of the same kind.
@@ -57,10 +53,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::usize;
 
-use cfg_if::cfg_if;
-
 /// Calls a libc function and results in `io::Result`.
-#[cfg(unix)]
 macro_rules! syscall {
     ($fn:ident $args:tt) => {{
         let res = unsafe { libc::$fn $args };
@@ -72,33 +65,8 @@ macro_rules! syscall {
     }};
 }
 
-cfg_if! {
-    if #[cfg(any(target_os = "linux", target_os = "android"))] {
-        mod epoll;
-        use epoll as sys;
-    } else if #[cfg(any(
-        target_os = "illumos",
-        target_os = "solaris",
-    ))] {
-        mod port;
-        use port as sys;
-    } else if #[cfg(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ))] {
-        mod kqueue;
-        use kqueue as sys;
-    } else if #[cfg(target_os = "windows")] {
-        mod wepoll;
-        use wepoll as sys;
-    } else {
-        compile_error!("polling does not support this target OS");
-    }
-}
+mod epoll;
+use epoll as sys;
 
 /// Key associated with notifications.
 const NOTIFY_KEY: usize = std::usize::MAX;
@@ -438,46 +406,22 @@ impl fmt::Debug for Poller {
     }
 }
 
-cfg_if! {
-    if #[cfg(unix)] {
-        use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, RawFd};
 
-        /// A [`RawFd`] or a reference to a type implementing [`AsRawFd`].
-        pub trait Source {
-            /// Returns the [`RawFd`] for this I/O object.
-            fn raw(&self) -> RawFd;
-        }
+/// A [`RawFd`] or a reference to a type implementing [`AsRawFd`].
+pub trait Source {
+    /// Returns the [`RawFd`] for this I/O object.
+    fn raw(&self) -> RawFd;
+}
 
-        impl Source for RawFd {
-            fn raw(&self) -> RawFd {
-                *self
-            }
-        }
+impl Source for RawFd {
+    fn raw(&self) -> RawFd {
+        *self
+    }
+}
 
-        impl<T: AsRawFd> Source for &T {
-            fn raw(&self) -> RawFd {
-                self.as_raw_fd()
-            }
-        }
-    } else if #[cfg(windows)] {
-        use std::os::windows::io::{AsRawSocket, RawSocket};
-
-        /// A [`RawSocket`] or a reference to a type implementing [`AsRawSocket`].
-        pub trait Source {
-            /// Returns the [`RawSocket`] for this I/O object.
-            fn raw(&self) -> RawSocket;
-        }
-
-        impl Source for RawSocket {
-            fn raw(&self) -> RawSocket {
-                *self
-            }
-        }
-
-        impl<T: AsRawSocket> Source for &T {
-            fn raw(&self) -> RawSocket {
-                self.as_raw_socket()
-            }
-        }
+impl<T: AsRawFd> Source for &T {
+    fn raw(&self) -> RawFd {
+        self.as_raw_fd()
     }
 }
